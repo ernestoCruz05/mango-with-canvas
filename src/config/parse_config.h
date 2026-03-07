@@ -337,6 +337,8 @@ typedef struct {
 	int32_t single_scratchpad;
 	int32_t xwayland_persistence;
 	int32_t syncobj_enable;
+	float drag_tile_refresh_interval;
+	float drag_floating_refresh_interval;
 	int32_t allow_tearing;
 	int32_t allow_shortcuts_inhibit;
 	int32_t allow_lock_transparent;
@@ -1346,6 +1348,10 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->xwayland_persistence = atoi(value);
 	} else if (strcmp(key, "syncobj_enable") == 0) {
 		config->syncobj_enable = atoi(value);
+	} else if (strcmp(key, "drag_tile_refresh_interval") == 0) {
+		config->drag_tile_refresh_interval = atof(value);
+	} else if (strcmp(key, "drag_floating_refresh_interval") == 0) {
+		config->drag_floating_refresh_interval = atof(value);
 	} else if (strcmp(key, "allow_tearing") == 0) {
 		config->allow_tearing = atoi(value);
 	} else if (strcmp(key, "allow_shortcuts_inhibit") == 0) {
@@ -3070,6 +3076,13 @@ void override_config(void) {
 	// 杂项设置
 	xwayland_persistence = CLAMP_INT(config.xwayland_persistence, 0, 1);
 	syncobj_enable = CLAMP_INT(config.syncobj_enable, 0, 1);
+	drag_tile_refresh_interval =
+		CLAMP_FLOAT(config.drag_tile_refresh_interval, 1.0f, 16.0f);
+	drag_floating_refresh_interval =
+		CLAMP_FLOAT(config.drag_floating_refresh_interval, 1.0f, 16.0f);
+	drag_tile_to_tile = CLAMP_INT(config.drag_tile_to_tile, 0, 1);
+	drag_floating_refresh_interval =
+		CLAMP_FLOAT(config.drag_floating_refresh_interval, 0.0f, 1000.0f);
 	allow_tearing = CLAMP_INT(config.allow_tearing, 0, 2);
 	allow_shortcuts_inhibit = CLAMP_INT(config.allow_shortcuts_inhibit, 0, 1);
 	allow_lock_transparent = CLAMP_INT(config.allow_lock_transparent, 0, 1);
@@ -3239,6 +3252,8 @@ void set_value_default() {
 	config.single_scratchpad = single_scratchpad;
 	config.xwayland_persistence = xwayland_persistence;
 	config.syncobj_enable = syncobj_enable;
+	config.drag_tile_refresh_interval = drag_tile_refresh_interval;
+	config.drag_floating_refresh_interval = drag_floating_refresh_interval;
 	config.allow_tearing = allow_tearing;
 	config.allow_shortcuts_inhibit = allow_shortcuts_inhibit;
 	config.allow_lock_transparent = allow_lock_transparent;
