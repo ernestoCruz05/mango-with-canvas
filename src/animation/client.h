@@ -432,9 +432,8 @@ void client_apply_clip(Client *c, float factor) {
 
 		apply_shield(c, clip_box);
 		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, &clip_box);
-
 		buffer_set_effect(
-			c, (BufferData){1.0f, 1.0f, clip_box.width, clip_box.height, true});
+			c, (BufferData){1.0f, 1.0f, clip_box.width, clip_box.height, false});
 		return;
 	}
 
@@ -823,7 +822,8 @@ void resize(Client *c, struct wlr_box geo, int32_t interact) {
 	// float_geom = c->geom;
 	bbox = (interact || c->isfloating || c->isfullscreen) ? &sgeom : &c->mon->w;
 
-	if (is_scroller_layout(c->mon) && (!c->isfloating || c == grabc)) {
+	if ((is_scroller_layout(c->mon) && (!c->isfloating || c == grabc)) ||
+		is_canvas_layout(c->mon)) {
 		c->geom = geo;
 		c->geom.width = MAX(1 + 2 * (int32_t)c->bw, c->geom.width);
 		c->geom.height = MAX(1 + 2 * (int32_t)c->bw, c->geom.height);

@@ -2719,21 +2719,6 @@ void commitnotify(struct wl_listener *listener, void *data) {
 				   new_geo->x != 0 || new_geo->y != 0;
 	}
 
-	if (c->mon && is_canvas_layout(c->mon) && !c->isfullscreen &&
-		!c->ismaximizescreen) {
-		uint32_t tag = c->mon->pertag->curtag;
-		float zoom = c->mon->pertag->canvas_zoom[tag];
-		float effective_zoom = zoom;
-		if (c->mon->canvas_in_overview &&
-			c->canvas_geom_backup[tag].width > 0) {
-			effective_zoom *= (float)c->canvas_geom[tag].width /
-							  c->canvas_geom_backup[tag].width;
-		}
-		if (effective_zoom != 1.0f) {
-			apply_visual_zoom(c, effective_zoom);
-		}
-	}
-
 	if (c == grabc || !c->dirty)
 		return;
 
@@ -3883,13 +3868,7 @@ keybinding(uint32_t state, bool locked, uint32_t mods, xkb_keysym_t sym,
 		(CLEANMASK(mods) & WLR_MODIFIER_LOGO) && selmon &&
 		selmon->pertag->ltidxs[selmon->pertag->curtag]->id == CANVAS) {
 		xkb_keysym_t lower = xkb_keysym_to_lower(sym);
-		if (lower == XKB_KEY_z) {
-			canvas_zoom_resize(&(Arg){.f = 1.0f / 1.1f});
-			return 1;
-		} else if (lower == XKB_KEY_x) {
-			canvas_zoom_resize(&(Arg){.f = 1.1f});
-			return 1;
-		} else if (lower == XKB_KEY_p) {
+		if (lower == XKB_KEY_p) {
 			canvas_overview_toggle(&(Arg){0});
 			return 1;
 		}
@@ -6040,7 +6019,6 @@ void setfullscreen(Client *c, int32_t fullscreen) // 用自定义全屏代理自
 			wlr_scene_node_set_position(&c->scene->node, c->mon->m.x,
 										c->mon->m.y);
 			wlr_scene_node_set_position(&c->scene_surface->node, 0, 0);
-			clear_visual_zoom(c);
 			struct wlr_box full_clip = {0, 0, c->mon->m.width,
 										c->mon->m.height};
 			wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node,
@@ -7373,20 +7351,6 @@ void createnotifyx11(struct wl_listener *listener, void *data) {
 void commitx11(struct wl_listener *listener, void *data) {
 	Client *c = wl_container_of(listener, c, commmitx11);
 	struct wlr_surface_state *state = &c->surface.xwayland->surface->current;
-
-	if (c->mon && is_canvas_layout(c->mon)) {
-		uint32_t tag = c->mon->pertag->curtag;
-		float zoom = c->mon->pertag->canvas_zoom[tag];
-		float effective_zoom = zoom;
-		if (c->mon->canvas_in_overview &&
-			c->canvas_geom_backup[tag].width > 0) {
-			effective_zoom *= (float)c->canvas_geom[tag].width /
-							  c->canvas_geom_backup[tag].width;
-		}
-		if (effective_zoom != 1.0f) {
-			apply_visual_zoom(c, effective_zoom);
-		}
-	}
 
 	if ((int32_t)c->geom.width - 2 * (int32_t)c->bw == (int32_t)state->width &&
 		(int32_t)c->geom.height - 2 * (int32_t)c->bw ==

@@ -820,7 +820,6 @@ void pre_caculate_before_arrange(Monitor *m, bool want_animation,
 			if (VISIBLEON(c, m) && c->canvas_floating) {
 				c->isfloating = 0;
 				c->canvas_floating = false;
-				clear_visual_zoom(c);
 			}
 		}
 	}

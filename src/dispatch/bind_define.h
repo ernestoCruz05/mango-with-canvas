@@ -1874,6 +1874,55 @@ int32_t scroller_stack(const Arg *arg) {
 	return 0;
 }
 
+int32_t canvas_zoom_resize(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+
+	Client *fs = focustop(selmon);
+	if (fs && fs->isfullscreen)
+		return 0;
+
+	float factor = arg->f;
+	if (factor <= 0.0f)
+		return 0;
+
+	uint32_t tag = selmon->pertag->curtag;
+	float old_zoom = selmon->pertag->canvas_zoom[tag];
+	selmon->pertag->canvas_zoom[tag] *= factor;
+	selmon->pertag->canvas_zoom[tag] =
+		CLAMP_FLOAT(selmon->pertag->canvas_zoom[tag], 0.1f, 1.0f);
+	float new_zoom = selmon->pertag->canvas_zoom[tag];
+
+	float center_canvas_x =
+		selmon->pertag->canvas_pan_x[tag] + (selmon->w.width / old_zoom) / 2.0f;
+	float center_canvas_y = selmon->pertag->canvas_pan_y[tag] +
+							(selmon->w.height / old_zoom) / 2.0f;
+	selmon->pertag->canvas_pan_x[tag] =
+		center_canvas_x - (selmon->w.width / new_zoom) / 2.0f;
+	selmon->pertag->canvas_pan_y[tag] =
+		center_canvas_y - (selmon->w.height / new_zoom) / 2.0f;
+
+	canvas_reposition(selmon);
+	return 0;
+}
+
+int32_t canvas_overview_toggle(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+
+	if (selmon->canvas_overview_visible && !selmon->canvas_overview_closing) {
+		selmon->canvas_overview_closing = true;
+		selmon->canvas_overview_anim_start = get_now_in_ms();
+	} else if (!selmon->canvas_overview_visible) {
+		selmon->canvas_overview_visible = true;
+		selmon->canvas_overview_closing = false;
+		selmon->canvas_overview_progress = 0.0f;
+		selmon->canvas_overview_anim_start = get_now_in_ms();
+	}
+	request_fresh_all_monitors();
+	return 0;
+}
+
 int32_t toggle_all_floating(const Arg *arg) {
 	if (!selmon || !selmon->sel)
 		return 0;
