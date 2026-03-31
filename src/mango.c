@@ -6965,6 +6965,8 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 
 		if (nextfocus) {
 			focusclient(nextfocus, 0);
+			if (selmon && is_canvas_layout(selmon))
+				canvas_pan_to_client(selmon, nextfocus);
 		}
 
 		if (!nextfocus && selmon->isoverview) {
@@ -7551,6 +7553,12 @@ void xwaylandready(struct wl_listener *listener, void *data) {
 
 static void setgeometrynotify(struct wl_listener *listener, void *data) {
 	Client *c = wl_container_of(listener, c, set_geometry);
+
+	if (c->mon && is_canvas_layout(c->mon)) {
+		client_set_size(c, c->geom.width - 2 * c->bw,
+						c->geom.height - 2 * c->bw);
+		return;
+	}
 
 	wlr_scene_node_set_position(&c->scene->node, c->surface.xwayland->x,
 								c->surface.xwayland->y);

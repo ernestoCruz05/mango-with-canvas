@@ -195,6 +195,12 @@ static void canvas_reposition(Monitor *m) {
 
 		wlr_scene_node_set_position(&c->scene->node, new_x, new_y);
 
+#ifdef XWAYLAND
+		if (client_is_x11(c))
+			client_set_size(c, c->geom.width - 2 * c->bw,
+							c->geom.height - 2 * c->bw);
+#endif
+
 		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);
 		client_apply_clip(c, 1.0);
 		if (zoom != 1.0f && !c->is_clip_to_hide)
