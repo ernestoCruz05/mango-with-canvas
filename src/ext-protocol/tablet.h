@@ -50,7 +50,7 @@ static void attach_tablet_pad(struct TabletPad *tablet_pad,
 							  struct Tablet *tablet);
 static void tablettoolmotion(struct TabletTool *tool, bool change_x,
 							 bool change_y, double x, double y, double dx,
-							 double dy);
+							 double dy, uint32_t time_msec);
 
 static struct wl_listener tablet_tool_axis = {.notify = tablettoolaxis};
 static struct wl_listener tablet_tool_button = {.notify = tablettoolbutton};
@@ -234,7 +234,8 @@ static void tablettoolsetcursor(struct wl_listener *listener, void *data) {
 }
 
 void tablettoolmotion(struct TabletTool *tool, bool change_x, bool change_y,
-					  double x, double y, double dx, double dy) {
+					  double x, double y, double dx, double dy,
+					  uint32_t time_msec) {
 	struct wlr_surface *surface = NULL;
 	Client *c = NULL, *w = NULL;
 	LayerSurface *l = NULL;
@@ -257,7 +258,7 @@ void tablettoolmotion(struct TabletTool *tool, bool change_x, bool change_y,
 		break;
 	}
 
-	motionnotify(0, NULL, 0, 0, 0, 0);
+	motionnotify(time_msec, NULL, 0, 0, 0, 0);
 
 	if (config.sloppyfocus)
 		selmon = xytomon(cursor->x, cursor->y);
@@ -355,7 +356,8 @@ void tablettoolproximity(struct wl_listener *listener, void *data) {
 		tool->curr_surface = NULL;
 		break;
 	case WLR_TABLET_TOOL_PROXIMITY_IN:
-		tablettoolmotion(tool, true, true, event->x, event->y, 0, 0);
+		tablettoolmotion(tool, true, true, event->x, event->y, 0, 0,
+						 event->time_msec);
 		break;
 	}
 }
@@ -368,7 +370,7 @@ void tablettoolaxis(struct wl_listener *listener, void *data) {
 
 	tablettoolmotion(tool, event->updated_axes & WLR_TABLET_TOOL_AXIS_X,
 					 event->updated_axes & WLR_TABLET_TOOL_AXIS_Y, event->x,
-					 event->y, event->dx, event->dy);
+					 event->y, event->dx, event->dy, event->time_msec);
 
 	if (event->updated_axes & WLR_TABLET_TOOL_AXIS_PRESSURE)
 		wlr_tablet_v2_tablet_tool_notify_pressure(tool->tool_v2,

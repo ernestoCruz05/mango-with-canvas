@@ -2256,7 +2256,7 @@ bool handle_buttonpress(struct wlr_pointer_button_event *event) {
 				grabcy = (int32_t)round(cursor->y);
 				cursor_mode = CurPan;
 				wlr_cursor_set_xcursor(cursor, cursor_mgr, "grabbing");
-				return;
+				return true;
 			}
 		}
 
@@ -2345,7 +2345,7 @@ bool handle_buttonpress(struct wlr_pointer_button_event *event) {
 				selmon->canvas_overview_anim_start = get_now_in_ms();
 				arrange(selmon, true, false);
 				request_fresh_all_monitors();
-				return;
+				return true;
 			}
 
 			if (selmon->isoverview && event->button == BTN_RIGHT && c) {
@@ -2367,7 +2367,7 @@ bool handle_buttonpress(struct wlr_pointer_button_event *event) {
 			cursor_mode = CurNormal;
 			wlr_cursor_set_xcursor(cursor, cursor_mgr, "default");
 			motionnotify(0, NULL, 0, 0, 0, 0);
-			return;
+			return false;
 		}
 		/* If you released any buttons, we exit interactive move/resize mode. */
 		if (!locked && cursor_mode != CurNormal && cursor_mode != CurPressed) {
