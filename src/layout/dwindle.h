@@ -226,16 +226,9 @@ static void dwindle_resize_client(Monitor *m, Client *c, int32_t dx,
 	if (config.smartgaps && n == 1)
 		gap_ih = gap_iv = gap_oh = gap_ov = 0;
 
-	Client *tc;
-	wl_list_for_each(tc, &clients, link) if (VISIBLEON(tc, m) && ISTILED(tc))
-		tc->snap_to_geom = true;
-
 	dwindle_assign(m->pertag->dwindle_root[tag], m->w.x + gap_oh,
 				   m->w.y + gap_ov, m->w.width - 2 * gap_oh,
 				   m->w.height - 2 * gap_ov, gap_ih, gap_iv);
-
-	wl_list_for_each(tc, &clients, link) if (VISIBLEON(tc, m) && ISTILED(tc))
-		tc->snap_to_geom = false;
 }
 
 static bool dwindle_get_resize_border(Monitor *m, Client *c, int32_t *out_x,

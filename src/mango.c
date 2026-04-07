@@ -4,6 +4,7 @@
 #include "wlr-layer-shell-unstable-v1-protocol.h"
 #include "wlr/util/box.h"
 #include "wlr/util/edges.h"
+#include <assert.h>
 #include <getopt.h>
 #include <libinput.h>
 #include <limits.h>
@@ -1125,15 +1126,15 @@ static struct wl_event_source *sync_keymap;
 #include "animation/tag.h"
 static void canvas_reposition(Monitor *m);
 static void canvas_pan_to_client(Monitor *m, Client *c);
-#include "dispatch/bind_define.h"
-#include "ext-protocol/all.h"
-#include "fetch/fetch.h"
 #include "layout/arrange.h"
 #include "layout/canvas.h"
 #include "layout/dwindle.h"
 #include "layout/horizontal.h"
 #include "layout/vertical.h"
+#include "dispatch/bind_define.h"
 #include "dispatch/gesture.h"
+#include "ext-protocol/all.h"
+#include "fetch/fetch.h"
 
 void client_change_mon(Client *c, Monitor *m) {
 	setmon(c, m, c->tags, true);
