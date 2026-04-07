@@ -13,6 +13,7 @@ static void vertical_scroller(Monitor *m);
 static void vertical_deck(Monitor *mon);
 static void tgmix(Monitor *m);
 static void canvas(Monitor *m);
+static void dwindle(Monitor *m);
 
 /* layout(s) */
 Layout overviewlayout = {"󰃇", overview, "overview"};
@@ -31,6 +32,7 @@ enum {
 	RIGHT_TILE,
 	TGMIX,
 	CANVAS,
+	DWINDLE,
 };
 
 Layout layouts[] = {
@@ -50,4 +52,5 @@ Layout layouts[] = {
 	{"VK", vertical_deck, "vertical_deck", VERTICAL_DECK}, // 垂直卡片布局
 	{"TG", tgmix, "tgmix", TGMIX},						   // 混合布局
 	{"CV", canvas, "canvas", CANVAS},					   // canvas layout
+	{"DW", dwindle, "dwindle", DWINDLE},
 };

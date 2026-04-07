@@ -892,7 +892,7 @@ void resize(Client *c, struct wlr_box geo, int32_t interact) {
 		c->mon->resizing_count_pending++;
 	}
 
-	if (c == grabc) {
+	if (c == grabc || (cursor_mode == CurResize && ISTILED(c))) {
 		c->animation.running = false;
 		c->need_output_flush = false;
 

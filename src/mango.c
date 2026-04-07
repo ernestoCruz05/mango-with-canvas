@@ -70,6 +70,10 @@
 #include <wlr/types/wlr_single_pixel_buffer_v1.h>
 #include <wlr/types/wlr_subcompositor.h>
 #include <wlr/types/wlr_switch.h>
+#include <wlr/types/wlr_tablet_pad.h>
+#include <wlr/types/wlr_tablet_tool.h>
+#include <wlr/types/wlr_tablet_v2.h>
+#include <wlr/types/wlr_touch.h>
 #include <wlr/types/wlr_viewporter.h>
 #include <wlr/types/wlr_virtual_keyboard_v1.h>
 #include <wlr/types/wlr_virtual_pointer_v1.h>
@@ -151,6 +155,32 @@ enum { SWIPE_UP, SWIPE_DOWN, SWIPE_LEFT, SWIPE_RIGHT };
 enum { CurNormal, CurPressed, CurMove, CurResize, CurPan }; /* cursor */
 enum { XDGShell, LayerShell, X11 };							/* client types */
 enum { AxisUp, AxisDown, AxisLeft, AxisRight };				// 滚轮滚动的方向
+enum {
+	TOUCH_SWIPE_UP,
+	TOUCH_SWIPE_DOWN,
+	TOUCH_SWIPE_RIGHT,
+	TOUCH_SWIPE_LEFT,
+	TOUCH_SWIPE_UP_RIGHT,
+	TOUCH_SWIPE_UP_LEFT,
+	TOUCH_SWIPE_DOWN_LEFT,
+	TOUCH_SWIPE_DOWN_RIGHT,
+	TOUCH_SWIPE_NONE
+};
+
+enum {
+	EDGE_ANY,
+	EDGE_NONE,
+	EDGE_LEFT,
+	EDGE_RIGHT,
+	EDGE_TOP,
+	EDGE_BOTTOM,
+	CORNER_TOP_LEFT,
+	CORNER_TOP_RIGHT,
+	CORNER_BOTTOM_LEFT,
+	CORNER_BOTTOM_RIGHT,
+};
+
+enum { DISTANCE_ANY, DISTANCE_SHORT, DISTANCE_MEDIUM, DISTANCE_LONG };
 enum {
 	LyrBg,
 	LyrBottom,
@@ -496,6 +526,25 @@ typedef struct {
 } Popup;
 
 typedef struct {
+	struct wl_list link;
+	int32_t touch_id;
+	double start_x, start_y, end_x, end_y, start_surface_x, start_surface_y;
+	double prev_x, prev_y;
+	bool consumed_by_gesture;
+} TouchPoint;
+
+typedef struct TouchGroup {
+	struct wl_list link;
+	struct wlr_touch *touch;
+	struct wl_list touch_points;
+	uint32_t pending_swipe;
+	uint32_t touch_points_pending_swipe;
+	Monitor *m;
+	double pinch_dist;
+	struct timespec time_down;
+} TouchGroup;
+
+typedef struct {
 	const char *symbol;
 	void (*arrange)(Monitor *);
 	const char *name;
@@ -704,6 +753,15 @@ static void setpsel(struct wl_listener *listener, void *data);
 static void setsel(struct wl_listener *listener, void *data);
 static void setup(void);
 static void startdrag(struct wl_listener *listener, void *data);
+
+static void createtouch(struct wlr_touch *touch);
+static void touchdown(struct wl_listener *listener, void *data);
+static void touchup(struct wl_listener *listener, void *data);
+static void touchframe(struct wl_listener *listener, void *data);
+static void touchmotion(struct wl_listener *listener, void *data);
+static void touchcancel(struct wl_listener *listener, void *data);
+static void handle_touchcancel(struct wlr_touch_cancel_event *event);
+static bool handle_buttonpress(struct wlr_pointer_button_event *event);
 
 static void unlocksession(struct wl_listener *listener, void *data);
 static void unmaplayersurfacenotify(struct wl_listener *listener, void *data);
@@ -974,6 +1032,8 @@ static struct {
 #include "client/client.h"
 #include "config/preset.h"
 
+typedef struct DwindleNode DwindleNode;
+
 struct Pertag {
 	uint32_t curtag, prevtag;			/* current and previous tag */
 	int32_t nmasters[LENGTH(tags) + 1]; /* number of windows in master area */
@@ -986,6 +1046,7 @@ struct Pertag {
 	float canvas_pan_x[LENGTH(tags) + 1];
 	float canvas_pan_y[LENGTH(tags) + 1];
 	float canvas_zoom[LENGTH(tags) + 1]; /* visual zoom factor, 1.0 = no zoom */
+	struct DwindleNode *dwindle_root[LENGTH(tags) + 1];
 };
 
 #include "config/parse_config.h"
@@ -1025,6 +1086,14 @@ static struct wl_listener request_set_sel = {.notify = setsel};
 static struct wl_listener request_set_cursor_shape = {.notify = setcursorshape};
 static struct wl_listener request_start_drag = {.notify = requeststartdrag};
 static struct wl_listener start_drag = {.notify = startdrag};
+static struct wl_listener touch_down = {.notify = touchdown};
+static struct wl_listener touch_frame = {.notify = touchframe};
+static struct wl_listener touch_motion = {.notify = touchmotion};
+static struct wl_listener touch_up = {.notify = touchup};
+static struct wl_listener touch_cancel = {.notify = touchcancel};
+static struct wl_list touch_groups;
+static bool emulating_pointer_from_touch = false;
+static int32_t emulated_pointer_touch_id;
 static struct wl_listener new_session_lock = {.notify = locksession};
 static struct wl_listener drm_lease_request = {.notify = requestdrmlease};
 static struct wl_listener keyboard_shortcuts_inhibit_new_inhibitor = {
@@ -1061,8 +1130,10 @@ static void canvas_pan_to_client(Monitor *m, Client *c);
 #include "fetch/fetch.h"
 #include "layout/arrange.h"
 #include "layout/canvas.h"
+#include "layout/dwindle.h"
 #include "layout/horizontal.h"
 #include "layout/vertical.h"
+#include "dispatch/gesture.h"
 
 void client_change_mon(Client *c, Monitor *m) {
 	setmon(c, m, c->tags, true);
@@ -2104,14 +2175,21 @@ void place_drag_tile_client(Client *c) {
 			}
 		}
 	}
-	if (closest_client && closest_client->link.prev != &c->link) {
-		wl_list_remove(&c->link);
-		c->link.next = &closest_client->link;
-		c->link.prev = closest_client->link.prev;
-		closest_client->link.prev->next = &c->link;
-		closest_client->link.prev = &c->link;
-	} else if (closest_client) {
-		exchange_two_client(c, closest_client);
+	if (closest_client) {
+		if (c->mon &&
+			c->mon->pertag->ltidxs[c->mon->pertag->curtag]->id == DWINDLE) {
+			uint32_t tag = c->mon->pertag->curtag;
+			dwindle_insert(&c->mon->pertag->dwindle_root[tag], c,
+						   closest_client, c->mon->pertag->mfacts[tag], false);
+		} else if (closest_client->link.prev != &c->link) {
+			wl_list_remove(&c->link);
+			c->link.next = &closest_client->link;
+			c->link.prev = closest_client->link.prev;
+			closest_client->link.prev->next = &c->link;
+			closest_client->link.prev = &c->link;
+		} else {
+			exchange_two_client(c, closest_client);
+		}
 	}
 	setfloating(c, 0);
 }
@@ -2134,9 +2212,7 @@ bool check_trackpad_disabled(struct wlr_pointer *pointer) {
 	return false;
 }
 
-void // 鼠标按键事件
-buttonpress(struct wl_listener *listener, void *data) {
-	struct wlr_pointer_button_event *event = data;
+bool handle_buttonpress(struct wlr_pointer_button_event *event) {
 	struct wlr_keyboard *hard_keyboard, *keyboard;
 	uint32_t hard_mods, mods;
 	Client *c = NULL;
@@ -2148,11 +2224,14 @@ buttonpress(struct wl_listener *listener, void *data) {
 	struct wlr_surface *old_pointer_focus_surface =
 		seat->pointer_state.focused_surface;
 
-	handlecursoractivity();
+	if (!event->pointer ||
+		event->pointer->base.type != WLR_INPUT_DEVICE_TOUCH) {
+		handlecursoractivity();
+	}
 	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 
-	if (check_trackpad_disabled(event->pointer)) {
-		return;
+	if (event->pointer && check_trackpad_disabled(event->pointer)) {
+		return false;
 	}
 
 	switch (event->state) {
@@ -2177,7 +2256,7 @@ buttonpress(struct wl_listener *listener, void *data) {
 				grabcy = (int32_t)round(cursor->y);
 				cursor_mode = CurPan;
 				wlr_cursor_set_xcursor(cursor, cursor_mgr, "grabbing");
-				return;
+				return true;
 			}
 		}
 
@@ -2218,7 +2297,7 @@ buttonpress(struct wl_listener *listener, void *data) {
 
 			if (selmon->isoverview && event->button == BTN_LEFT && c) {
 				toggleoverview(&(Arg){.i = 1});
-				return;
+				return true;
 			}
 
 			if (selmon->canvas_overview_visible &&
@@ -2266,12 +2345,12 @@ buttonpress(struct wl_listener *listener, void *data) {
 				selmon->canvas_overview_anim_start = get_now_in_ms();
 				arrange(selmon, true, false);
 				request_fresh_all_monitors();
-				return;
+				return true;
 			}
 
 			if (selmon->isoverview && event->button == BTN_RIGHT && c) {
 				pending_kill_client(c);
-				return;
+				return true;
 			}
 
 			if (CLEANMASK(mods) == CLEANMASK(m->mod) &&
@@ -2279,7 +2358,7 @@ buttonpress(struct wl_listener *listener, void *data) {
 				(CLEANMASK(m->mod) != 0 ||
 				 (event->button != BTN_LEFT && event->button != BTN_RIGHT))) {
 				m->func(&m->arg);
-				return;
+				return true;
 			}
 		}
 		break;
@@ -2288,7 +2367,7 @@ buttonpress(struct wl_listener *listener, void *data) {
 			cursor_mode = CurNormal;
 			wlr_cursor_set_xcursor(cursor, cursor_mgr, "default");
 			motionnotify(0, NULL, 0, 0, 0, 0);
-			return;
+			return false;
 		}
 		/* If you released any buttons, we exit interactive move/resize mode. */
 		if (!locked && cursor_mode != CurNormal && cursor_mode != CurPressed) {
@@ -2323,7 +2402,7 @@ buttonpress(struct wl_listener *listener, void *data) {
 				apply_window_snap(tmpc);
 			}
 			tmpc->drag_to_tile = false;
-			return;
+			return false;
 		} else {
 			cursor_mode = CurNormal;
 		}
@@ -2333,6 +2412,12 @@ buttonpress(struct wl_listener *listener, void *data) {
 	 * pointer focus that a button press has occurred */
 	wlr_seat_pointer_notify_button(seat, event->time_msec, event->button,
 								   event->state);
+	return false;
+}
+
+void // 鼠标按键事件
+buttonpress(struct wl_listener *listener, void *data) {
+	handle_buttonpress(data);
 }
 
 void checkidleinhibitor(struct wlr_surface *exclude) {
@@ -3795,6 +3880,15 @@ void inputdevice(struct wl_listener *listener, void *data) {
 	case WLR_INPUT_DEVICE_SWITCH:
 		createswitch(wlr_switch_from_input_device(device));
 		break;
+	case WLR_INPUT_DEVICE_TOUCH:
+		createtouch(wlr_touch_from_input_device(device));
+		break;
+	case WLR_INPUT_DEVICE_TABLET:
+		createtablet(device);
+		break;
+	case WLR_INPUT_DEVICE_TABLET_PAD:
+		createtabletpad(device);
+		break;
 	default:
 		/* TODO handle other input device types */
 		break;
@@ -3808,6 +3902,8 @@ void inputdevice(struct wl_listener *listener, void *data) {
 	caps = WL_SEAT_CAPABILITY_POINTER;
 	if (!wl_list_empty(&kb_group->wlr_group->devices))
 		caps |= WL_SEAT_CAPABILITY_KEYBOARD;
+	if (!wl_list_empty(&touch_groups))
+		caps |= WL_SEAT_CAPABILITY_TOUCH;
 	wlr_seat_set_capabilities(seat, caps);
 }
 
@@ -4577,6 +4673,15 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 				last_apply_drap_time = time;
 			}
 			return;
+		} else if (grabc->mon &&
+				   grabc->mon->pertag->ltidxs[grabc->mon->pertag->curtag]->id ==
+					   DWINDLE) {
+			int32_t dx = (int32_t)round(cursor->x) - grabcx;
+			int32_t dy = (int32_t)round(cursor->y) - grabcy;
+			grabcx = (int32_t)round(cursor->x);
+			grabcy = (int32_t)round(cursor->y);
+			if (dx || dy)
+				dwindle_resize_client(grabc->mon, grabc, dx, dy);
 		} else {
 			resize_tile_client(grabc, true, 0, 0, time);
 		}
@@ -5622,10 +5727,20 @@ void exchange_two_client(Client *c1, Client *c2) {
 		tmp_tags = c2->tags;
 		setmon(c2, c1->mon, c1->tags, false);
 		setmon(c1, tmp_mon, tmp_tags, false);
+		if (c1->mon &&
+			c1->mon->pertag->ltidxs[c1->mon->pertag->curtag]->id == DWINDLE)
+			dwindle_swap_clients(
+				&c1->mon->pertag->dwindle_root[c1->mon->pertag->curtag], c1,
+				c2);
 		arrange(c1->mon, false, false);
 		arrange(c2->mon, false, false);
 		focusclient(c1, 0);
 	} else {
+		if (c1->mon &&
+			c1->mon->pertag->ltidxs[c1->mon->pertag->curtag]->id == DWINDLE)
+			dwindle_swap_clients(
+				&c1->mon->pertag->dwindle_root[c1->mon->pertag->curtag], c1,
+				c2);
 		arrange(c1->mon, false, false);
 	}
 
@@ -6478,6 +6593,19 @@ void setup(void) {
 	wl_signal_add(&cursor->events.button, &cursor_button);
 	wl_signal_add(&cursor->events.axis, &cursor_axis);
 	wl_signal_add(&cursor->events.frame, &cursor_frame);
+	wl_signal_add(&cursor->events.tablet_tool_proximity,
+				  &tablet_tool_proximity);
+	wl_signal_add(&cursor->events.tablet_tool_axis, &tablet_tool_axis);
+	wl_signal_add(&cursor->events.tablet_tool_button, &tablet_tool_button);
+	wl_signal_add(&cursor->events.tablet_tool_tip, &tablet_tool_tip);
+
+	wl_list_init(&touch_groups);
+
+	wl_signal_add(&cursor->events.touch_down, &touch_down);
+	wl_signal_add(&cursor->events.touch_frame, &touch_frame);
+	wl_signal_add(&cursor->events.touch_motion, &touch_motion);
+	wl_signal_add(&cursor->events.touch_up, &touch_up);
+	wl_signal_add(&cursor->events.touch_cancel, &touch_cancel);
 
 	// 这两句代码会造成obs窗口里的鼠标光标消失,不知道注释有什么影响
 	cursor_shape_mgr = wlr_cursor_shape_manager_v1_create(dpy, 1);
@@ -6500,6 +6628,10 @@ void setup(void) {
 	virtual_pointer_mgr = wlr_virtual_pointer_manager_v1_create(dpy);
 	wl_signal_add(&virtual_pointer_mgr->events.new_virtual_pointer,
 				  &new_virtual_pointer);
+
+	tablet_mgr = wlr_tablet_v2_create(dpy);
+	wl_list_init(&tablets);
+	wl_list_init(&tablet_pads);
 
 	pointer_gestures = wlr_pointer_gestures_v1_create(dpy);
 	LISTEN_STATIC(&cursor->events.swipe_begin, swipe_begin);
@@ -6586,6 +6718,324 @@ void startdrag(struct wl_listener *listener, void *data) {
 
 	drag->icon->data = &wlr_scene_drag_icon_create(drag_icon, drag->icon)->node;
 	LISTEN_STATIC(&drag->icon->events.destroy, destroydragicon);
+}
+
+void createtouch(struct wlr_touch *wlr_touch) {
+	TouchGroup *touch = ecalloc(1, sizeof(TouchGroup));
+	touch->touch = wlr_touch;
+	wl_list_init(&touch->touch_points);
+	wl_list_insert(&touch_groups, &touch->link);
+	wlr_touch->data = touch;
+	wlr_cursor_attach_input_device(cursor, &wlr_touch->base);
+}
+
+void touchdown(struct wl_listener *listener, void *data) {
+	struct wlr_touch_down_event *event = data;
+	TouchGroup *tg = event->touch->data;
+	TouchPoint *t = ecalloc(1, sizeof(TouchPoint));
+	double lx, ly;
+	double sx, sy;
+	double dx, dy;
+	struct wlr_surface *surface;
+	Client *c = NULL;
+	Monitor *m = NULL;
+	Monitor *m_iter;
+
+	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
+
+	if (!cursor_hidden) {
+		hidecursor(NULL);
+	}
+
+	wl_list_for_each(m_iter, &mons, link) {
+		if (m_iter == NULL || m_iter->wlr_output == NULL) {
+			continue;
+		}
+		if (event->touch->output_name != NULL &&
+			0 != strcmp(event->touch->output_name, m_iter->wlr_output->name)) {
+			continue;
+		}
+
+		wlr_cursor_map_input_to_output(cursor, &event->touch->base,
+									   m_iter->wlr_output);
+		m = m_iter;
+		break;
+	}
+
+	if (!tg->m)
+		tg->m = m;
+
+	wlr_cursor_absolute_to_layout_coords(cursor, &event->touch->base, event->x,
+										 event->y, &lx, &ly);
+
+	t->touch_id = event->touch_id;
+	t->start_x = lx;
+	t->start_y = ly;
+	t->prev_x = lx;
+	t->prev_y = ly;
+	gesture_touch_down(tg, t, lx, ly);
+	wl_list_insert(&tg->touch_points, &t->link);
+
+	if (wl_list_length(&tg->touch_points) == 2) {
+		TouchPoint *tp_pd;
+		wl_list_for_each(tp_pd, &tg->touch_points, link) {
+			if (tp_pd->touch_id != t->touch_id) {
+				tg->pinch_dist = sqrt(pow(lx - tp_pd->start_x, 2) +
+									  pow(ly - tp_pd->start_y, 2));
+				break;
+			}
+		}
+	}
+
+	xytonode(lx, ly, &surface, &c, NULL, &sx, &sy);
+	t->start_surface_x = sx;
+	t->start_surface_y = sy;
+	if (surface != NULL && wlr_surface_accepts_touch(surface, seat)) {
+		if (c)
+			focusclient(c, 0);
+
+		wlr_seat_touch_notify_down(seat, surface, event->time_msec,
+								   event->touch_id, sx, sy);
+		emulating_pointer_from_touch = false;
+		return;
+	}
+
+	if (!emulating_pointer_from_touch) {
+		emulating_pointer_from_touch = true;
+		emulated_pointer_touch_id = event->touch_id;
+
+		wlr_cursor_warp_closest(cursor, &event->touch->base, lx, ly);
+		dx = lx - cursor->x;
+		dy = ly - cursor->y;
+		motionnotify(event->time_msec, &event->touch->base, dx, dy, dx, dy);
+
+		struct wlr_pointer_button_event button_event = {
+			.pointer = (struct wlr_pointer *)event->touch,
+			.time_msec = event->time_msec,
+			.button = BTN_LEFT,
+			.state = WL_POINTER_BUTTON_STATE_PRESSED};
+		buttonpress(NULL, &button_event);
+	}
+}
+
+void touchup(struct wl_listener *listener, void *data) {
+	struct wlr_touch_up_event *event = data;
+	TouchGroup *tg = event->touch->data;
+	TouchPoint *t = NULL;
+	TouchPoint *t_iter;
+
+	wl_list_for_each(t_iter, &tg->touch_points, link) {
+		if (t_iter->touch_id == event->touch_id) {
+			t = t_iter;
+			break;
+		}
+	}
+	if (!t)
+		return;
+
+	gesture_touch_up(tg, t);
+
+	if (t->consumed_by_gesture) {
+		wl_list_remove(&t->link);
+		free(t);
+		return;
+	}
+
+	wl_list_remove(&t->link);
+	free(t);
+
+	if (emulating_pointer_from_touch) {
+		if (emulated_pointer_touch_id == event->touch_id) {
+			struct wlr_pointer_button_event button_event = {
+				.pointer = (struct wlr_pointer *)event->touch,
+				.time_msec = event->time_msec,
+				.button = BTN_LEFT,
+				.state = WL_POINTER_BUTTON_STATE_RELEASED};
+			buttonpress(NULL, &button_event);
+
+			emulating_pointer_from_touch = false;
+		}
+		return;
+	}
+
+	if (!wlr_seat_touch_get_point(seat, event->touch_id)) {
+		return;
+	}
+
+	wlr_seat_touch_notify_up(seat, event->time_msec, event->touch_id);
+	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
+}
+
+void touchframe(struct wl_listener *listener, void *data) {
+	if (emulating_pointer_from_touch) {
+		wlr_seat_pointer_notify_frame(seat);
+	} else {
+		wlr_seat_touch_notify_frame(seat);
+	}
+	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
+}
+
+void touchmotion(struct wl_listener *listener, void *data) {
+	struct wlr_touch_motion_event *event = data;
+	TouchGroup *tg = event->touch->data;
+	TouchPoint *t = NULL;
+	TouchPoint *t_iter;
+	double lx, ly;
+	double sx, sy;
+	double dx, dy;
+	struct wlr_surface *surface;
+	Client *c = NULL;
+	struct wlr_touch_point *p = NULL;
+
+	wl_list_for_each(t_iter, &tg->touch_points, link) {
+		if (t_iter->touch_id == event->touch_id) {
+			t = t_iter;
+			break;
+		}
+	}
+	if (!t)
+		return;
+
+	wlr_cursor_absolute_to_layout_coords(cursor, &event->touch->base, event->x,
+										 event->y, &lx, &ly);
+
+	gesture_touch_motion(tg, t, lx, ly);
+
+	int32_t nfingers = wl_list_length(&tg->touch_points);
+	if (selmon && is_canvas_layout(selmon) &&
+		!(focustop(selmon) && focustop(selmon)->isfullscreen)) {
+		uint32_t tag = selmon->pertag->curtag;
+		float zoom = selmon->pertag->canvas_zoom[tag];
+
+		if (nfingers == 3) {
+			double pdx = lx - t->prev_x;
+			double pdy = ly - t->prev_y;
+			selmon->pertag->canvas_pan_x[tag] -= pdx / zoom;
+			selmon->pertag->canvas_pan_y[tag] -= pdy / zoom;
+			canvas_reposition(selmon);
+		} else if (nfingers == 2) {
+			TouchPoint *other = NULL;
+			TouchPoint *tp_iter;
+			wl_list_for_each(tp_iter, &tg->touch_points, link) {
+				if (tp_iter->touch_id != t->touch_id) {
+					other = tp_iter;
+					break;
+				}
+			}
+			if (other) {
+				double cur_dist = sqrt(pow(lx - other->end_x, 2) +
+									   pow(ly - other->end_y, 2));
+				if (tg->pinch_dist > 1.0 && cur_dist > 1.0) {
+					float factor = (float)(cur_dist / tg->pinch_dist);
+					float old_zoom = zoom;
+					selmon->pertag->canvas_zoom[tag] =
+						CLAMP_FLOAT(zoom * factor, 0.1f, 1.0f);
+					float new_zoom = selmon->pertag->canvas_zoom[tag];
+					float cx = selmon->pertag->canvas_pan_x[tag] +
+							   (selmon->w.width / old_zoom) / 2.0f;
+					float cy = selmon->pertag->canvas_pan_y[tag] +
+							   (selmon->w.height / old_zoom) / 2.0f;
+					selmon->pertag->canvas_pan_x[tag] =
+						cx - (selmon->w.width / new_zoom) / 2.0f;
+					selmon->pertag->canvas_pan_y[tag] =
+						cy - (selmon->w.height / new_zoom) / 2.0f;
+					canvas_reposition(selmon);
+				}
+				tg->pinch_dist = cur_dist;
+			}
+		}
+	}
+	t->prev_x = lx;
+	t->prev_y = ly;
+
+	if (emulating_pointer_from_touch) {
+		if (emulated_pointer_touch_id == event->touch_id) {
+			dx = lx - cursor->x;
+			dy = ly - cursor->y;
+			motionnotify(event->time_msec, &event->touch->base, dx, dy, dx, dy);
+		}
+		return;
+	}
+
+	p = wlr_seat_touch_get_point(seat, event->touch_id);
+
+	if (!p) {
+		return;
+	}
+
+	sx = t->start_surface_x + (lx - t->start_x);
+	sy = t->start_surface_y + (ly - t->start_y);
+
+	surface = p->surface;
+	if (surface && surface->data) {
+		toplevel_from_wlr_surface(surface, &c, NULL);
+		if (c)
+			focusclient(c, 0);
+	}
+	wlr_seat_touch_notify_motion(seat, event->time_msec, event->touch_id, sx,
+								 sy);
+
+	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
+}
+
+void touchcancel(struct wl_listener *listener, void *data) {
+	struct wlr_touch_cancel_event *event = data;
+	TouchGroup *tg = event->touch->data;
+	TouchPoint *t = NULL;
+	TouchPoint *t_iter;
+
+	wl_list_for_each(t_iter, &tg->touch_points, link) {
+		if (t_iter->touch_id == event->touch_id) {
+			t = t_iter;
+			break;
+		}
+	}
+	if (!t)
+		return;
+
+	wl_list_remove(&t->link);
+	free(t);
+
+	if (wl_list_length(&tg->touch_points) == 0)
+		tg->touch_points_pending_swipe = 0;
+
+	handle_touchcancel(event);
+}
+
+void handle_touchcancel(struct wlr_touch_cancel_event *event) {
+	struct wlr_touch_point *p = NULL;
+	struct wl_client *client = NULL;
+	struct wlr_seat_client *seat_client = NULL;
+
+	if (emulating_pointer_from_touch) {
+		if (emulated_pointer_touch_id == event->touch_id) {
+			struct wlr_pointer_button_event button_event = {
+				.pointer = (struct wlr_pointer *)event->touch,
+				.time_msec = event->time_msec,
+				.button = BTN_LEFT,
+				.state = WL_POINTER_BUTTON_STATE_RELEASED};
+			buttonpress(NULL, &button_event);
+
+			emulating_pointer_from_touch = false;
+		}
+		return;
+	}
+
+	p = wlr_seat_touch_get_point(seat, event->touch_id);
+
+	if (!p) {
+		return;
+	}
+
+	if (p->surface) {
+		client = wl_resource_get_client(p->surface->resource);
+		seat_client = wlr_seat_client_for_wl_client(seat, client);
+		if (seat_client != NULL) {
+			wlr_seat_touch_notify_cancel(seat, seat_client);
+		}
+	}
+
+	wlr_idle_notifier_v1_notify_activity(idle_notifier, seat);
 }
 
 void tag_client(const Arg *arg, Client *target_client) {
@@ -6892,6 +7342,7 @@ void unmapnotify(struct wl_listener *listener, void *data) {
 	c->next_in_stack = NULL;
 	c->prev_in_stack = NULL;
 
+	dwindle_remove_client(c);
 	wlr_scene_node_destroy(&c->scene->node);
 	printstatus();
 	motionnotify(0, NULL, 0, 0, 0, 0);

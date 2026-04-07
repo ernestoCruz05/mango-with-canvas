@@ -113,7 +113,18 @@ int32_t exchange_client(const Arg *arg) {
 
 	Client *tc = direction_select(arg);
 	tc = get_focused_stack_client(tc);
-	exchange_two_client(c, tc);
+
+	if (!tc)
+		return 0;
+
+	if (c->mon && c->mon->pertag->ltidxs[c->mon->pertag->curtag]->id == DWINDLE) {
+		uint32_t tag = c->mon->pertag->curtag;
+		dwindle_move_client(&c->mon->pertag->dwindle_root[tag], c, tc,
+							c->mon->pertag->mfacts[tag], arg->i);
+		arrange(c->mon, false, false);
+	} else {
+		exchange_two_client(c, tc);
+	}
 	return 0;
 }
 
@@ -421,6 +432,8 @@ int32_t moveresize(const Arg *arg) {
 
 			wlr_cursor_set_xcursor(cursor, cursor_mgr, cursors[rzcorner]);
 		} else {
+			grabcx = (int32_t)round(cursor->x);
+			grabcy = (int32_t)round(cursor->y);
 			wlr_cursor_set_xcursor(cursor, cursor_mgr, "grab");
 		}
 		break;
