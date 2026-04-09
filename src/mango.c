@@ -188,6 +188,7 @@ enum {
 	LyrBlur,
 	LyrBottom,
 	LyrTile,
+	LyrFloat,
 	LyrTop,
 	LyrFadeOut,
 	LyrOverlay,
@@ -6139,10 +6140,10 @@ setfloating(Client *c, int32_t floating) {
 	if (c->isoverlay) {
 		wlr_scene_node_reparent(&c->scene->node, layers[LyrOverlay]);
 	} else if (client_should_overtop(c) && c->isfloating) {
-		wlr_scene_node_reparent(&c->scene->node, layers[LyrTop]);
+		wlr_scene_node_reparent(&c->scene->node, layers[LyrFloat]);
 	} else {
 		wlr_scene_node_reparent(&c->scene->node,
-								layers[c->isfloating ? LyrTop : LyrTile]);
+								layers[c->isfloating ? LyrFloat : LyrTile]);
 	}
 
 	if (!c->isfloating && old_floating_state &&
@@ -6238,7 +6239,7 @@ void setmaximizescreen(Client *c, int32_t maximizescreen) {
 	}
 
 	wlr_scene_node_reparent(&c->scene->node,
-							layers[c->isfloating ? LyrTop : LyrTile]);
+							layers[c->isfloating ? LyrFloat : LyrTile]);
 	if (!c->ismaximizescreen && old_maximizescreen_state) {
 		restore_size_per(c->mon, c);
 	}
@@ -6321,11 +6322,11 @@ void setfullscreen(Client *c, int32_t fullscreen) // 用自定义全屏代理自
 	if (c->isoverlay) {
 		wlr_scene_node_reparent(&c->scene->node, layers[LyrOverlay]);
 	} else if (client_should_overtop(c) && c->isfloating) {
-		wlr_scene_node_reparent(&c->scene->node, layers[LyrTop]);
+		wlr_scene_node_reparent(&c->scene->node, fullscreen ? layers[LyrTop] : layers[LyrFloat]);
 	} else {
 		wlr_scene_node_reparent(
 			&c->scene->node,
-			layers[fullscreen || c->isfloating ? LyrTop : LyrTile]);
+			layers[fullscreen ? LyrTop : (c->isfloating ? LyrFloat : LyrTile)]);
 	}
 
 	if (!c->isfullscreen && old_fullscreen_state) {
