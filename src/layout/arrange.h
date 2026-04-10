@@ -1,5 +1,8 @@
 #include <assert.h>
 
+static void dwindle_resize_client_step(Monitor *m, Client *c, int32_t dx,
+				       int32_t dy);
+
 void save_old_size_per(Monitor *m) {
 	Client *c = NULL;
 
@@ -708,6 +711,8 @@ void resize_tile_client(Client *grabc, bool isdrag, int32_t offsetx,
 		resize_tile_scroller(grabc, isdrag, offsetx, offsety, time, false);
 	} else if (current_layout->id == VERTICAL_SCROLLER) {
 		resize_tile_scroller(grabc, isdrag, offsetx, offsety, time, true);
+	} else if (current_layout->id == DWINDLE) {
+		dwindle_resize_client_step(grabc->mon, grabc, offsetx, offsety);
 	}
 }
 
