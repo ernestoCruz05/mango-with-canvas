@@ -238,6 +238,61 @@ static void dwindle_resize_client(Monitor *m, Client *c, int32_t dx,
 		tc->snap_to_geom = false;
 }
 
+static void dwindle_resize_client_step(Monitor *m, Client *c, int32_t dx,
+				       int32_t dy) {
+	uint32_t tag = m->pertag->curtag;
+	DwindleNode *leaf = dwindle_find_leaf(m->pertag->dwindle_root[tag], c);
+	if (!leaf)
+		return;
+
+	DwindleNode *h_node = NULL;
+	DwindleNode *v_node = NULL;
+	DwindleNode *node = leaf->parent;
+	while (node) {
+		if (node->split_h && !h_node)
+			h_node = node;
+		if (!node->split_h && !v_node)
+			v_node = node;
+		if (h_node && v_node)
+			break;
+		node = node->parent;
+	}
+
+	if (!h_node && !v_node)
+		return;
+
+	if (h_node && dx) {
+		float cw = (float)MAX(1, h_node->container_w);
+		float delta = (float)dx / cw;
+		h_node->ratio = CLAMP_FLOAT(h_node->ratio + delta, 0.05f, 0.95f);
+	}
+
+	if (v_node && dy) {
+		float ch = (float)MAX(1, v_node->container_h);
+		float delta = (float)dy / ch;
+		v_node->ratio = CLAMP_FLOAT(v_node->ratio + delta, 0.05f, 0.95f);
+	}
+
+	int32_t n_clients = m->visible_tiling_clients;
+	int32_t gap_ih = enablegaps ? m->gappih : 0;
+	int32_t gap_iv = enablegaps ? m->gappiv : 0;
+	int32_t gap_oh = enablegaps ? m->gappoh : 0;
+	int32_t gap_ov = enablegaps ? m->gappov : 0;
+	if (config.smartgaps && n_clients == 1)
+		gap_ih = gap_iv = gap_oh = gap_ov = 0;
+
+	Client *tc;
+	wl_list_for_each(tc, &clients, link) if (VISIBLEON(tc, m) && ISTILED(tc))
+		tc->snap_to_geom = true;
+
+	dwindle_assign(m->pertag->dwindle_root[tag], m->w.x + gap_oh,
+		       m->w.y + gap_ov, m->w.width - 2 * gap_oh,
+		       m->w.height - 2 * gap_ov, gap_ih, gap_iv);
+
+	wl_list_for_each(tc, &clients, link) if (VISIBLEON(tc, m) && ISTILED(tc))
+		tc->snap_to_geom = false;
+}
+
 static bool dwindle_get_resize_border(Monitor *m, Client *c, int32_t *out_x,
 									  int32_t *out_y) {
 	uint32_t tag = m->pertag->curtag;
