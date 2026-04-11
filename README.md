@@ -27,6 +27,43 @@ This project's development is based on [dwl](https://codeberg.org/dwl/dwl/).
 
 https://github.com/user-attachments/assets/bb83004a-0563-4b48-ad89-6461a9b78b1f
 
+# Extended configuration
+Small placeholder for the config values
+```conf
+#canvas stuff
+bind=SUPER,o,toggleminimap,
+bind=SUPER,p,canvas_overview_toggle,
+bind=SUPER,z,canvas_zoom_resize,0.7
+bind=SUPER,x,canvas_zoom_resize,1.3
+bind=SUPER,u,canvas_fill_viewport,
+bind=SUPER,c,canvas_centerview,
+
+#dir: 1=left, 2=right, 3=up, 4=down, 5=smart (closest edge to mouse)
+canvas_tiling = 0;
+canvas_tiling_gap = 10;
+canvas_pan_on_kill = 1; 0 for no panning after kill
+
+canvas_notile:1 windowrule parameter if you want a specific type of window to not tile on canvas
+
+#i still have to add configurable dwindle stuff like use_active_window or split multipliers
+
+#touchscreen related stuff
+touch_distance_threshold = 100
+touch_degrees_leniency = 30
+touch_timeoutms = 1000
+touch_edge_size_left = 50
+touch_edge_size_top = 50
+touch_edge_size_right = 50
+touch_edge_size_bottom = 50
+
+# For a carousel-like behaviour when swapping tags
+tag_carousel=1
+```
+Default keybinds:
+- SUPER + M3 for pan
+- 3 fingers for span (touchscreen/touchpad)
+- 2 fingers pinch motioon for zoom in/zoom out (touchscreen/touchpad)
+
 # Mango's Vision
 
 **Mango's primary goal is stability**: After months of testing and development—and aside from a few lingering GPU compatibility issues—it should now be stable enough. I don't plan on making many breaking changes.
