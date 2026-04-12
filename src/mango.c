@@ -565,6 +565,10 @@ struct Monitor {
 	bool canvas_overview_closing;	// true while animating out
 	float canvas_overview_progress; // 0.0 = hidden, 1.0 = fully visible
 	uint32_t canvas_overview_anim_start;
+	bool     canvas_pan_anim_active;
+	float    canvas_pan_anim_start_x, canvas_pan_anim_start_y;
+	float    canvas_pan_anim_target_x, canvas_pan_anim_target_y;
+	uint32_t canvas_pan_anim_start_ms;
 	struct wlr_scene_output *scene_output;
 	struct wlr_output_state pending;
 	struct wl_listener frame;
@@ -1041,6 +1045,9 @@ struct Pertag {
 	float canvas_pan_x[LENGTH(tags) + 1];
 	float canvas_pan_y[LENGTH(tags) + 1];
 	float canvas_zoom[LENGTH(tags) + 1]; /* visual zoom factor, 1.0 = no zoom */
+	float    canvas_anchor_x[LENGTH(tags) + 1][9];
+	float    canvas_anchor_y[LENGTH(tags) + 1][9];
+	uint16_t canvas_anchor_valid[LENGTH(tags) + 1]; /* bitmask: bit N = anchor N set */
 	struct DwindleNode *dwindle_root[LENGTH(tags) + 1];
 };
 
@@ -2310,25 +2317,6 @@ bool handle_buttonpress(struct wlr_pointer_button_event *event) {
 		selmon = xytomon(cursor->x, cursor->y);
 		if (locked)
 			break;
-
-		{
-			struct wlr_keyboard *kb = wlr_seat_get_keyboard(seat);
-			uint32_t pmods = kb ? wlr_keyboard_get_modifiers(kb) : 0;
-			struct wlr_keyboard *hkb = &kb_group->wlr_group->keyboard;
-			uint32_t hmods = hkb ? wlr_keyboard_get_modifiers(hkb) : 0;
-			pmods = pmods | hmods;
-			if (event->button == BTN_MIDDLE &&
-				(CLEANMASK(pmods) & WLR_MODIFIER_LOGO) && selmon &&
-				selmon->pertag->ltidxs[selmon->pertag->curtag]->id == CANVAS &&
-				!cursor_in_minimap(selmon, cursor->x, cursor->y) &&
-				!(focustop(selmon) && focustop(selmon)->isfullscreen)) {
-				grabcx = (int32_t)round(cursor->x);
-				grabcy = (int32_t)round(cursor->y);
-				cursor_mode = CurPan;
-				wlr_cursor_set_xcursor(cursor, cursor_mgr, "grabbing");
-				return true;
-			}
-		}
 
 		xytonode(cursor->x, cursor->y, &surface, NULL, NULL, NULL, NULL);
 		if (toplevel_from_wlr_surface(surface, &c, &l) >= 0) {
@@ -5387,6 +5375,30 @@ void rendermon(struct wl_listener *listener, void *data) {
 			}
 		}
 
+		{
+			static const float anchor_colors[9][4] = {
+				{1.0f, 0.3f, 0.3f, 0.9f}, // 0: red
+				{1.0f, 0.6f, 0.2f, 0.9f}, // 1: orange
+				{1.0f, 0.9f, 0.2f, 0.9f}, // 2: yellow
+				{0.4f, 0.9f, 0.3f, 0.9f}, // 3: green
+				{0.2f, 0.8f, 0.8f, 0.9f}, // 4: cyan
+				{0.3f, 0.5f, 1.0f, 0.9f}, // 5: blue
+				{0.6f, 0.3f, 1.0f, 0.9f}, // 6: purple
+				{1.0f, 0.4f, 0.7f, 0.9f}, // 7: pink
+				{1.0f, 1.0f, 1.0f, 0.9f}, // 8: white
+			};
+			uint16_t valid = m->pertag->canvas_anchor_valid[tag];
+			for (int ai = 0; ai < 9; ai++) {
+				if (!(valid & (1 << ai)))
+					continue;
+				int ax = (int)((m->pertag->canvas_anchor_x[tag][ai] - min_x) * scale) - 3;
+				int ay = (int)((m->pertag->canvas_anchor_y[tag][ai] - min_y) * scale) - 3;
+				struct wlr_scene_rect *ar =
+					wlr_scene_rect_create(minimap_scene_tree, 6, 6, anchor_colors[ai]);
+				wlr_scene_node_set_position(&ar->node, ax, ay);
+			}
+		}
+
 		float pan_x = m->pertag->canvas_pan_x[tag];
 		float pan_y = m->pertag->canvas_pan_y[tag];
 		float zoom = m->pertag->canvas_zoom[tag];
@@ -5420,6 +5432,36 @@ void rendermon(struct wl_listener *listener, void *data) {
 	} else if (!m->minimap_visible && minimap_scene_tree) {
 		wlr_scene_node_destroy(&minimap_scene_tree->node);
 		minimap_scene_tree = NULL;
+	}
+
+	if (m->canvas_pan_anim_active &&
+		m->pertag->ltidxs[m->pertag->curtag]->id == CANVAS) {
+		uint32_t tag = m->pertag->curtag;
+		uint32_t anim_duration = 300;
+		uint32_t elapsed = get_now_in_ms() - m->canvas_pan_anim_start_ms;
+		float raw_t = (float)elapsed / (float)anim_duration;
+		if (raw_t > 1.0f)
+			raw_t = 1.0f;
+
+		float t = (float)find_animation_curve_at((double)raw_t, OPAFADEOUT);
+
+		m->pertag->canvas_pan_x[tag] =
+			m->canvas_pan_anim_start_x +
+			(m->canvas_pan_anim_target_x - m->canvas_pan_anim_start_x) * t;
+		m->pertag->canvas_pan_y[tag] =
+			m->canvas_pan_anim_start_y +
+			(m->canvas_pan_anim_target_y - m->canvas_pan_anim_start_y) * t;
+
+		canvas_reposition(m);
+
+		if (raw_t >= 1.0f) {
+			m->pertag->canvas_pan_x[tag] = m->canvas_pan_anim_target_x;
+			m->pertag->canvas_pan_y[tag] = m->canvas_pan_anim_target_y;
+			m->canvas_pan_anim_active = false;
+			canvas_reposition(m);
+		} else {
+			need_more_frames = true;
+		}
 	}
 
 	if (m->canvas_overview_visible &&

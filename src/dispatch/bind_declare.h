@@ -77,3 +77,6 @@ int32_t canvas_overview_toggle(const Arg *arg);
 int32_t canvas_fill_viewport(const Arg *arg);
 int32_t canvas_centerview(const Arg *arg);
 int32_t toggle_all_floating(const Arg *arg);
+int32_t canvas_drag_pan(const Arg *arg);
+int32_t canvas_anchor_set(const Arg *arg);
+int32_t canvas_anchor_go(const Arg *arg);

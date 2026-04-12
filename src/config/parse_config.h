@@ -326,6 +326,7 @@ typedef struct {
 	int32_t canvas_tiling;
 	int32_t canvas_tiling_gap;
 	int32_t canvas_pan_on_kill;
+	int32_t canvas_anchor_animate;
 	int32_t tag_carousel;
 	float scratchpad_width_ratio;
 	float scratchpad_height_ratio;
@@ -1332,6 +1333,14 @@ FuncType parse_func_name(char *func_name, Arg *arg, char *arg_value,
 		func = canvas_fill_viewport;
 	} else if (strcmp(func_name, "canvas_centerview") == 0) {
 		func = canvas_centerview;
+	} else if (strcmp(func_name, "canvas_drag_pan") == 0) {
+		func = canvas_drag_pan;
+	} else if (strcmp(func_name, "canvas_anchor_set") == 0) {
+		func = canvas_anchor_set;
+		(*arg).i = atoi(arg_value);
+	} else if (strcmp(func_name, "canvas_anchor_go") == 0) {
+		func = canvas_anchor_go;
+		(*arg).i = atoi(arg_value);
 	} else {
 		return NULL;
 	}
@@ -1843,6 +1852,8 @@ bool parse_option(Config *config, char *key, char *value) {
 		config->canvas_tiling_gap = atoi(value);
 	} else if (strcmp(key, "canvas_pan_on_kill") == 0) {
 		config->canvas_pan_on_kill = atoi(value);
+	} else if (strcmp(key, "canvas_anchor_animate") == 0) {
+		config->canvas_anchor_animate = atoi(value);
 	} else if (strcmp(key, "tag_carousel") == 0) {
 		config->tag_carousel = atoi(value);
 	} else if (strcmp(key, "rootcolor") == 0) {
@@ -3620,6 +3631,7 @@ void set_value_default() {
 	config.canvas_tiling = 0;
 	config.canvas_tiling_gap = 10;
 	config.canvas_pan_on_kill = 1;
+	config.canvas_anchor_animate = 0;
 	config.tag_carousel = 0;
 	config.overviewgappi = 5;
 	config.overviewgappo = 30;

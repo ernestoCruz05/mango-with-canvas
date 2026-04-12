@@ -2059,6 +2059,65 @@ int32_t canvas_fill_viewport(const Arg *arg) {
 	return 0;
 }
 
+int32_t canvas_drag_pan(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+	if (cursor_in_minimap(selmon, cursor->x, cursor->y))
+		return 0;
+	Client *fs = focustop(selmon);
+	if (fs && fs->isfullscreen)
+		return 0;
+	grabcx = (int32_t)round(cursor->x);
+	grabcy = (int32_t)round(cursor->y);
+	cursor_mode = CurPan;
+	wlr_cursor_set_xcursor(cursor, cursor_mgr, "grabbing");
+	return 0;
+}
+
+int32_t canvas_anchor_set(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+	int idx = arg->i;
+	if (idx < 0 || idx > 8)
+		return 0;
+	uint32_t tag = selmon->pertag->curtag;
+	selmon->pertag->canvas_anchor_x[tag][idx] =
+		selmon->pertag->canvas_pan_x[tag];
+	selmon->pertag->canvas_anchor_y[tag][idx] =
+		selmon->pertag->canvas_pan_y[tag];
+	selmon->pertag->canvas_anchor_valid[tag] |= (uint16_t)(1 << idx);
+	return 0;
+}
+
+int32_t canvas_anchor_go(const Arg *arg) {
+	if (!selmon || !is_canvas_layout(selmon))
+		return 0;
+	int idx = arg->i;
+	if (idx < 0 || idx > 8)
+		return 0;
+	uint32_t tag = selmon->pertag->curtag;
+	if (!(selmon->pertag->canvas_anchor_valid[tag] & (1 << idx)))
+		return 0;
+
+	float target_x = selmon->pertag->canvas_anchor_x[tag][idx];
+	float target_y = selmon->pertag->canvas_anchor_y[tag][idx];
+
+	if (!config.canvas_anchor_animate) {
+		selmon->pertag->canvas_pan_x[tag] = target_x;
+		selmon->pertag->canvas_pan_y[tag] = target_y;
+		canvas_reposition(selmon);
+	} else {
+		selmon->canvas_pan_anim_start_x = selmon->pertag->canvas_pan_x[tag];
+		selmon->canvas_pan_anim_start_y = selmon->pertag->canvas_pan_y[tag];
+		selmon->canvas_pan_anim_target_x = target_x;
+		selmon->canvas_pan_anim_target_y = target_y;
+		selmon->canvas_pan_anim_start_ms = get_now_in_ms();
+		selmon->canvas_pan_anim_active = true;
+		request_fresh_all_monitors();
+	}
+	return 0;
+}
+
 int32_t toggle_all_floating(const Arg *arg) {
 	if (!selmon || !selmon->sel)
 		return 0;
