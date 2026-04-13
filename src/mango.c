@@ -4466,6 +4466,7 @@ mapnotify(struct wl_listener *listener, void *data) {
 	/* Called when the surface is mapped, or ready to display on-screen. */
 	Client *at_client = NULL;
 	Client *c = wl_container_of(listener, c, map);
+	wlr_log(WLR_INFO, "[canvas_debug] mapnotify start: client=%p mon=%p", c, c->mon);
 	/* Create scene tree for this client and its border */
 	c->scene = client_surface(c)->data = wlr_scene_tree_create(layers[LyrTile]);
 	wlr_scene_node_set_enabled(&c->scene->node, c->type != XDGShell);
@@ -4474,13 +4475,16 @@ mapnotify(struct wl_listener *listener, void *data) {
 			? wlr_scene_xdg_surface_create(c->scene, c->surface.xdg)
 			: wlr_scene_subsurface_tree_create(c->scene, client_surface(c));
 	c->scene->node.data = c->scene_surface->node.data = c;
+	wlr_log(WLR_INFO, "[canvas_debug] mapnotify: scene tree created client=%p", c);
 
 	client_get_geometry(c, &c->geom);
+	wlr_log(WLR_INFO, "[canvas_debug] mapnotify: got geometry %dx%d client=%p", c->geom.width, c->geom.height, c);
 
 	if (client_is_x11(c))
 		init_client_properties(c);
 
 	if (c->mon && c->mon->canvas_in_overview) {
+		wlr_log(WLR_INFO, "[canvas_debug] mapnotify: canvas in overview, toggling off client=%p", c);
 		canvas_overview_toggle(&(Arg){0});
 	}
 
@@ -4569,16 +4573,22 @@ mapnotify(struct wl_listener *listener, void *data) {
 	}
 
 	// apply buffer effects of client
+	wlr_log(WLR_INFO, "[canvas_debug] mapnotify: before iter_xdg_scene_buffers client=%p", c);
 	wlr_scene_node_for_each_buffer(&c->scene_surface->node,
 								   iter_xdg_scene_buffers, c);
+	wlr_log(WLR_INFO, "[canvas_debug] mapnotify: after iter_xdg_scene_buffers client=%p", c);
 
 	// set border color
 	setborder_color(c);
 
 	// make sure the animation is open type
 	c->is_pending_open_animation = true;
+	wlr_log(WLR_INFO, "[canvas_debug] mapnotify: before resize client=%p is_canvas=%d", c,
+			c->mon ? is_canvas_layout(c->mon) : -1);
 	resize(c, c->geom, 0);
+	wlr_log(WLR_INFO, "[canvas_debug] mapnotify: after resize client=%p", c);
 	printstatus();
+	wlr_log(WLR_INFO, "[canvas_debug] mapnotify done: client=%p", c);
 }
 
 void maximizenotify(struct wl_listener *listener, void *data) {

@@ -49,9 +49,13 @@ static Client *canvas_chain_end(Monitor *m, uint32_t tag, Client *ref, int dir,
 
 static void canvas_geom_init(Client *c, Monitor *m, uint32_t tag, float pan_x,
 							 float pan_y, int *cascade_idx) {
+	wlr_log(WLR_INFO, "[canvas_debug] canvas_geom_init start: client=%p geom=%dx%d",
+			c, c->geom.width, c->geom.height);
 	int w = c->geom.width > 100 ? c->geom.width : 640;
 	int h = c->geom.height > 100 ? c->geom.height : 480;
 	float zoom = m->pertag->canvas_zoom[tag];
+	wlr_log(WLR_INFO, "[canvas_debug] canvas_geom_init: w=%d h=%d zoom=%.3f tiling=%d",
+			w, h, zoom, config.canvas_tiling);
 
 	int tiling = config.canvas_tiling;
 
@@ -153,9 +157,12 @@ static void canvas_geom_init(Client *c, Monitor *m, uint32_t tag, float pan_x,
 	}
 	c->canvas_geom[tag].width = w;
 	c->canvas_geom[tag].height = h;
+	wlr_log(WLR_INFO, "[canvas_debug] canvas_geom_init done: canvas_geom=%d,%d %dx%d",
+			c->canvas_geom[tag].x, c->canvas_geom[tag].y, w, h);
 }
 
 static void canvas_reposition(Monitor *m) {
+	wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition start");
 	Client *c;
 	uint32_t tag = m->pertag->curtag;
 
@@ -176,6 +183,9 @@ static void canvas_reposition(Monitor *m) {
 		int new_y =
 			m->w.y + (int32_t)roundf((c->canvas_geom[tag].y - pan_y) * zoom);
 
+		wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition: client=%p new_x=%d new_y=%d zoom=%.3f",
+				c, new_x, new_y, zoom);
+
 		if (c->animation.running) {
 			c->animation.running = false;
 			c->need_output_flush = false;
@@ -194,7 +204,9 @@ static void canvas_reposition(Monitor *m) {
 		c->animainit_geom.x = new_x;
 		c->animainit_geom.y = new_y;
 
+		wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition: before wlr_scene_node_set_position client=%p", c);
 		wlr_scene_node_set_position(&c->scene->node, new_x, new_y);
+		wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition: after wlr_scene_node_set_position client=%p", c);
 
 #ifdef XWAYLAND
 		if (client_is_x11(c))
@@ -202,20 +214,30 @@ static void canvas_reposition(Monitor *m) {
 							c->geom.height - 2 * c->bw);
 #endif
 
+		wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition: before set_clip client=%p", c);
 		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, NULL);
+		wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition: before apply_clip client=%p", c);
 		client_apply_clip(c, 1.0);
-		if (zoom != 1.0f && !c->is_clip_to_hide)
+		wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition: after apply_clip client=%p", c);
+		if (zoom != 1.0f && !c->is_clip_to_hide) {
+			wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition: before apply_canvas_zoom_correct client=%p zoom=%.3f", c, zoom);
 			apply_canvas_zoom_correct(c, zoom);
+			wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition: after apply_canvas_zoom_correct client=%p", c);
+		}
 	}
+	wlr_log(WLR_INFO, "[canvas_debug] canvas_reposition done");
 }
 
 static void canvas(Monitor *m) {
+	wlr_log(WLR_INFO, "[canvas_debug] canvas layout start");
 	Client *c;
 	uint32_t tag = m->pertag->curtag;
 
 	float pan_x = m->pertag->canvas_pan_x[tag];
 	float pan_y = m->pertag->canvas_pan_y[tag];
 	float zoom = m->pertag->canvas_zoom[tag];
+
+	wlr_log(WLR_INFO, "[canvas_debug] canvas: tag=%u pan=%.1f,%.1f zoom=%.3f", tag, pan_x, pan_y, zoom);
 
 	int cascade_idx = 0;
 	Client *newly_tiled = NULL;
@@ -227,7 +249,11 @@ static void canvas(Monitor *m) {
 		if (c->isfullscreen || c->ismaximizescreen)
 			continue;
 
+		wlr_log(WLR_INFO, "[canvas_debug] canvas: processing client=%p canvas_geom=%dx%d",
+				c, c->canvas_geom[tag].width, c->canvas_geom[tag].height);
+
 		if (c->canvas_geom[tag].width == 0 && c->canvas_geom[tag].height == 0) {
+			wlr_log(WLR_INFO, "[canvas_debug] canvas: calling canvas_geom_init for client=%p", c);
 			canvas_geom_init(c, m, tag, pan_x, pan_y, &cascade_idx);
 			if (config.canvas_tiling > 0 && !newly_tiled)
 				newly_tiled = c;
@@ -254,16 +280,25 @@ static void canvas(Monitor *m) {
 			.width = base_w,
 			.height = base_h,
 		};
+		wlr_log(WLR_INFO, "[canvas_debug] canvas: before resize client=%p geom=%d,%d %dx%d effective_zoom=%.3f",
+				c, screen_x, screen_y, base_w, base_h, effective_zoom);
 		resize(c, client_geom, 0);
+		wlr_log(WLR_INFO, "[canvas_debug] canvas: after resize client=%p", c);
 
-		if (effective_zoom == 1.0f)
+		if (effective_zoom == 1.0f) {
+			wlr_log(WLR_INFO, "[canvas_debug] canvas: before clear_visual_zoom client=%p", c);
 			clear_visual_zoom(c);
-		else
+			wlr_log(WLR_INFO, "[canvas_debug] canvas: after clear_visual_zoom client=%p", c);
+		} else {
+			wlr_log(WLR_INFO, "[canvas_debug] canvas: before apply_visual_zoom client=%p zoom=%.3f", c, effective_zoom);
 			apply_visual_zoom(c, effective_zoom);
+			wlr_log(WLR_INFO, "[canvas_debug] canvas: after apply_visual_zoom client=%p", c);
+		}
 	}
 
 	if (newly_tiled)
 		canvas_pan_to_client(m, newly_tiled);
+	wlr_log(WLR_INFO, "[canvas_debug] canvas layout done");
 }
 
 static void canvas_pan_to_client(Monitor *m, Client *c) {
