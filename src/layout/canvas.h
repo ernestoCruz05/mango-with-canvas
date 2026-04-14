@@ -214,9 +214,6 @@ static void canvas_reposition(Monitor *m) {
 							c->geom.height - 2 * c->bw);
 #endif
 
-		wlr_log(WLR_ERROR, "[canvas_debug] canvas_reposition: before apply_clip client=%p", c);
-		client_apply_clip(c, 1.0);
-		wlr_log(WLR_ERROR, "[canvas_debug] canvas_reposition: after apply_clip client=%p", c);
 		if (zoom != 1.0f && !c->is_clip_to_hide) {
 			wlr_log(WLR_ERROR, "[canvas_debug] canvas_reposition: before apply_canvas_zoom_correct client=%p zoom=%.3f", c, zoom);
 			apply_canvas_zoom_correct(c, zoom);
