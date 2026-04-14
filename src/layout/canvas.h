@@ -287,7 +287,7 @@ static void canvas(Monitor *m) {
 
 		if (effective_zoom == 1.0f) {
 			wlr_log(WLR_ERROR, "[canvas_debug] canvas: before clear_visual_zoom client=%p", c);
-			clear_visual_zoom(c);
+			// clear_visual_zoom(c);
 			wlr_log(WLR_ERROR, "[canvas_debug] canvas: after clear_visual_zoom client=%p", c);
 		} else {
 			wlr_log(WLR_ERROR, "[canvas_debug] canvas: before apply_visual_zoom client=%p zoom=%.3f", c, effective_zoom);
