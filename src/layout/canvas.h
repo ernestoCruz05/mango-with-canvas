@@ -253,11 +253,6 @@ static void canvas(Monitor *m) {
 			.height = base_h,
 		};
 		resize(c, client_geom, 0);
-
-		if (effective_zoom == 1.0f)
-			clear_visual_zoom(c);
-		else
-			apply_visual_zoom(c, effective_zoom);
 	}
 
 	if (newly_tiled)

@@ -256,6 +256,29 @@ static void apply_canvas_zoom_correct(Client *c, float zoom) {
 								   scene_buffer_apply_canvas_zoom, &zoom);
 }
 
+static void scene_buffer_apply_zoom_dest_only(struct wlr_scene_buffer *buffer,
+											  int32_t sx, int32_t sy,
+											  void *data) {
+	float zoom = *(float *)data;
+	struct wlr_scene_surface *scene_surface =
+		wlr_scene_surface_try_from_buffer(buffer);
+	if (!scene_surface)
+		return;
+	int32_t w = buffer->dst_width > 0 ? buffer->dst_width
+									  : scene_surface->surface->current.width;
+	int32_t h = buffer->dst_height > 0 ? buffer->dst_height
+									   : scene_surface->surface->current.height;
+	wlr_scene_buffer_set_dest_size(buffer, (int32_t)roundf(w * zoom),
+								   (int32_t)roundf(h * zoom));
+}
+
+static void apply_canvas_zoom_dest_only(Client *c, float zoom) {
+	if (!c || !c->scene)
+		return;
+	wlr_scene_node_for_each_buffer(&c->scene_surface->node,
+								   scene_buffer_apply_zoom_dest_only, &zoom);
+}
+
 static void scene_buffer_apply_zoom(struct wlr_scene_buffer *buffer, int32_t sx,
 									int32_t sy, void *data) {
 	float zoom = *(float *)data;
@@ -536,7 +559,7 @@ void client_apply_clip(Client *c, float factor) {
 		apply_shield(c, clip_box);
 		wlr_scene_subsurface_tree_set_clip(&c->scene_surface->node, &clip_box);
 		buffer_set_effect(
-			c, (BufferData){1.0f, 1.0f, clip_box.width, clip_box.height, false});
+			c, (BufferData){1.0f, 1.0f, clip_box.width, clip_box.height, true});
 		return;
 	}
 

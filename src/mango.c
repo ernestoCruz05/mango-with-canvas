@@ -563,9 +563,9 @@ struct Monitor {
 	bool canvas_overview_closing;	// true while animating out
 	float canvas_overview_progress; // 0.0 = hidden, 1.0 = fully visible
 	uint32_t canvas_overview_anim_start;
-	bool     canvas_pan_anim_active;
-	float    canvas_pan_anim_start_x, canvas_pan_anim_start_y;
-	float    canvas_pan_anim_target_x, canvas_pan_anim_target_y;
+	bool canvas_pan_anim_active;
+	float canvas_pan_anim_start_x, canvas_pan_anim_start_y;
+	float canvas_pan_anim_target_x, canvas_pan_anim_target_y;
 	uint32_t canvas_pan_anim_start_ms;
 	struct wlr_scene_output *scene_output;
 	struct wlr_output_state pending;
@@ -1061,8 +1061,8 @@ struct Pertag {
 	float canvas_pan_x[LENGTH(tags) + 1];
 	float canvas_pan_y[LENGTH(tags) + 1];
 	float canvas_zoom[LENGTH(tags) + 1]; /* visual zoom factor, 1.0 = no zoom */
-	float    canvas_anchor_x[LENGTH(tags) + 1][9];
-	float    canvas_anchor_y[LENGTH(tags) + 1][9];
+	float canvas_anchor_x[LENGTH(tags) + 1][9];
+	float canvas_anchor_y[LENGTH(tags) + 1][9];
 	uint16_t canvas_anchor_valid[LENGTH(tags) + 1];
 	struct DwindleNode *dwindle_root[LENGTH(tags) + 1];
 };
@@ -1143,9 +1143,9 @@ static struct wl_event_source *sync_keymap;
 #include "animation/tag.h"
 static void canvas_reposition(Monitor *m);
 static void canvas_pan_to_client(Monitor *m, Client *c);
-#include "layout/dwindle.h"
 #include "layout/arrange.h"
 #include "layout/canvas.h"
+#include "layout/dwindle.h"
 #include "layout/horizontal.h"
 #include "layout/vertical.h"
 #include "dispatch/bind_define.h"
@@ -2890,10 +2890,51 @@ void commitnotify(struct wl_listener *listener, void *data) {
 				   new_geo->x != 0 || new_geo->y != 0;
 	}
 
-	if (c == grabc || !c->dirty)
+	if (c == grabc || !c->dirty) {
+		if (c->mon && is_canvas_layout(c->mon) && !c->isfullscreen &&
+			!c->ismaximizescreen) {
+			uint32_t tag = c->mon->pertag->curtag;
+			float zoom = c->mon->pertag->canvas_zoom[tag];
+			float effective_zoom = zoom;
+			if (c->mon->canvas_in_overview &&
+				c->canvas_geom_backup[tag].width > 0)
+				effective_zoom *= (float)c->canvas_geom[tag].width /
+								  c->canvas_geom_backup[tag].width;
+			if (effective_zoom != 1.0f && !c->is_clip_to_hide) {
+				struct wlr_box clip_box;
+				client_get_clip(c, &clip_box);
+				clip_to_hide(c, &clip_box);
+				if (clip_box.width > 0 && clip_box.height > 0) {
+					buffer_set_effect(c, (BufferData){1.0f, 1.0f,
+									  clip_box.width, clip_box.height, true});
+					apply_canvas_zoom_dest_only(c, effective_zoom);
+				}
+			}
+		}
 		return;
+	}
 
 	resize(c, c->geom, 0);
+
+	if (c->mon && is_canvas_layout(c->mon) && !c->isfullscreen &&
+		!c->ismaximizescreen) {
+		uint32_t tag = c->mon->pertag->curtag;
+		float zoom = c->mon->pertag->canvas_zoom[tag];
+		float effective_zoom = zoom;
+		if (c->mon->canvas_in_overview && c->canvas_geom_backup[tag].width > 0)
+			effective_zoom *= (float)c->canvas_geom[tag].width /
+							  c->canvas_geom_backup[tag].width;
+		if (effective_zoom != 1.0f && !c->is_clip_to_hide) {
+			struct wlr_box clip_box;
+			client_get_clip(c, &clip_box);
+			clip_to_hide(c, &clip_box);
+			if (clip_box.width > 0 && clip_box.height > 0) {
+				buffer_set_effect(c, (BufferData){1.0f, 1.0f,
+								  clip_box.width, clip_box.height, true});
+				apply_canvas_zoom_dest_only(c, effective_zoom);
+			}
+		}
+	}
 
 	new_geo = &c->surface.xdg->geometry;
 	c->dirty = new_geo->width != c->geom.width - 2 * c->bw ||
@@ -4382,6 +4423,16 @@ mapnotify(struct wl_listener *listener, void *data) {
 			: wlr_scene_subsurface_tree_create(c->scene, client_surface(c));
 	c->scene->node.data = c->scene_surface->node.data = c;
 
+	/* Re-register commit listener after scene tree so our handler fires
+	 * after wlroots' internal handler (which resets buffer dest_size). */
+	if (c->type == XDGShell) {
+		wl_list_remove(&c->commit.link);
+		wl_signal_add(&client_surface(c)->events.commit, &c->commit);
+	} else {
+		wl_list_remove(&c->commmitx11.link);
+		wl_signal_add(&client_surface(c)->events.commit, &c->commmitx11);
+	}
+
 	client_get_geometry(c, &c->geom);
 
 	if (client_is_x11(c))
@@ -4416,9 +4467,12 @@ mapnotify(struct wl_listener *listener, void *data) {
 	c->ext_foreign_toplevel = wlr_ext_foreign_toplevel_handle_v1_create(
 		foreign_toplevel_list, &foreign_toplevel_state);
 	c->ext_foreign_toplevel->data = c;
-	c->image_capture_tree = c->type == XDGShell
-		? wlr_scene_xdg_surface_create(&c->image_capture_scene->tree, c->surface.xdg)
-		: wlr_scene_subsurface_tree_create(&c->image_capture_scene->tree, client_surface(c));
+	c->image_capture_tree =
+		c->type == XDGShell
+			? wlr_scene_xdg_surface_create(&c->image_capture_scene->tree,
+										   c->surface.xdg)
+			: wlr_scene_subsurface_tree_create(&c->image_capture_scene->tree,
+											   client_surface(c));
 
 	/* Handle unmanaged clients first so we can return prior create borders
 	 */
@@ -4653,14 +4707,14 @@ void resize_floating_window(Client *grabc) {
 		grabc->float_geom = box;
 		resize(grabc, box, 1);
 	} else {
-		cdx = !(rzcorner & 1) &&
-					  grabc->geom.width - 2 * (int)grabc->bw - cdx < 1
-				  ? 0
-				  : cdx;
-		cdy = !(rzcorner & 2) &&
-					  grabc->geom.height - 2 * (int)grabc->bw - cdy < 1
-				  ? 0
-				  : cdy;
+		cdx =
+			!(rzcorner & 1) && grabc->geom.width - 2 * (int)grabc->bw - cdx < 1
+				? 0
+				: cdx;
+		cdy =
+			!(rzcorner & 2) && grabc->geom.height - 2 * (int)grabc->bw - cdy < 1
+				? 0
+				: cdy;
 
 		const struct wlr_box box = {
 			.x = grabc->geom.x + (rzcorner & 1 ? 0 : cdx),
@@ -5171,6 +5225,35 @@ int32_t toggleminimap(const Arg *arg) {
 	return 0;
 }
 
+struct thumbnail_ctx {
+	struct wlr_scene_tree *tree;
+	int rx, ry;
+	float surf_scale;
+	bool any_rendered;
+};
+
+static void render_surface_thumbnail(struct wlr_surface *surface, int sx,
+									 int sy, void *data) {
+	struct thumbnail_ctx *ctx = data;
+	if (!surface->buffer)
+		return;
+	int sw = (int)(surface->current.width * ctx->surf_scale);
+	int sh = (int)(surface->current.height * ctx->surf_scale);
+	if (sw < 1)
+		sw = 1;
+	if (sh < 1)
+		sh = 1;
+	struct wlr_scene_buffer *sbuf =
+		wlr_scene_buffer_create(ctx->tree, &surface->buffer->base);
+	if (!sbuf)
+		return;
+	wlr_scene_buffer_set_dest_size(sbuf, sw, sh);
+	wlr_scene_node_set_position(&sbuf->node,
+								ctx->rx + (int)(sx * ctx->surf_scale),
+								ctx->ry + (int)(sy * ctx->surf_scale));
+	ctx->any_rendered = true;
+}
+
 void rendermon(struct wl_listener *listener, void *data) {
 	Monitor *m = wl_container_of(listener, m, frame);
 	Client *c = NULL, *tmp = NULL;
@@ -5301,16 +5384,18 @@ void rendermon(struct wl_listener *listener, void *data) {
 			if (rh < 4)
 				rh = 4;
 
-			struct wlr_buffer *buffer =
-				surface->buffer ? &surface->buffer->base : NULL;
-			if (buffer) {
-				struct wlr_scene_buffer *sbuf =
-					wlr_scene_buffer_create(minimap_scene_tree, buffer);
-				if (sbuf) {
-					wlr_scene_buffer_set_dest_size(sbuf, rw, rh);
-					wlr_scene_node_set_position(&sbuf->node, rx, ry);
-				}
-			} else {
+			struct thumbnail_ctx tctx = {
+				.tree = minimap_scene_tree,
+				.rx = rx,
+				.ry = ry,
+				.surf_scale = c->canvas_geom[tag].width > 0
+								  ? (float)rw / c->canvas_geom[tag].width
+								  : scale,
+				.any_rendered = false,
+			};
+			wlr_surface_for_each_surface(surface, render_surface_thumbnail,
+										 &tctx);
+			if (!tctx.any_rendered) {
 				float color[4] = {0.3f, 0.5f, 0.7f, 0.8f};
 				if (c == focustop(m)) {
 					color[0] = 0.8f;
@@ -5325,24 +5410,24 @@ void rendermon(struct wl_listener *listener, void *data) {
 
 		{
 			static const float anchor_colors[9][4] = {
-				{1.0f, 0.3f, 0.3f, 0.9f},
-				{1.0f, 0.6f, 0.2f, 0.9f},
-				{1.0f, 0.9f, 0.2f, 0.9f},
-				{0.4f, 0.9f, 0.3f, 0.9f},
-				{0.2f, 0.8f, 0.8f, 0.9f},
-				{0.3f, 0.5f, 1.0f, 0.9f},
-				{0.6f, 0.3f, 1.0f, 0.9f},
-				{1.0f, 0.4f, 0.7f, 0.9f},
+				{1.0f, 0.3f, 0.3f, 0.9f}, {1.0f, 0.6f, 0.2f, 0.9f},
+				{1.0f, 0.9f, 0.2f, 0.9f}, {0.4f, 0.9f, 0.3f, 0.9f},
+				{0.2f, 0.8f, 0.8f, 0.9f}, {0.3f, 0.5f, 1.0f, 0.9f},
+				{0.6f, 0.3f, 1.0f, 0.9f}, {1.0f, 0.4f, 0.7f, 0.9f},
 				{1.0f, 1.0f, 1.0f, 0.9f},
 			};
 			uint16_t valid = m->pertag->canvas_anchor_valid[tag];
 			for (int ai = 0; ai < 9; ai++) {
 				if (!(valid & (1 << ai)))
 					continue;
-				int ax = (int)((m->pertag->canvas_anchor_x[tag][ai] - min_x) * scale) - 3;
-				int ay = (int)((m->pertag->canvas_anchor_y[tag][ai] - min_y) * scale) - 3;
-				struct wlr_scene_rect *ar =
-					wlr_scene_rect_create(minimap_scene_tree, 6, 6, anchor_colors[ai]);
+				int ax = (int)((m->pertag->canvas_anchor_x[tag][ai] - min_x) *
+							   scale) -
+						 3;
+				int ay = (int)((m->pertag->canvas_anchor_y[tag][ai] - min_y) *
+							   scale) -
+						 3;
+				struct wlr_scene_rect *ar = wlr_scene_rect_create(
+					minimap_scene_tree, 6, 6, anchor_colors[ai]);
 				wlr_scene_node_set_position(&ar->node, ax, ay);
 			}
 		}
@@ -5622,16 +5707,18 @@ void rendermon(struct wl_listener *listener, void *data) {
 			if (rh < 1)
 				rh = 1;
 
-			struct wlr_buffer *buffer =
-				surface->buffer ? &surface->buffer->base : NULL;
-			if (buffer) {
-				struct wlr_scene_buffer *sbuf =
-					wlr_scene_buffer_create(overview_scene_tree, buffer);
-				if (sbuf) {
-					wlr_scene_buffer_set_dest_size(sbuf, rw, rh);
-					wlr_scene_node_set_position(&sbuf->node, rx, ry);
-				}
-			} else {
+			struct thumbnail_ctx tctx = {
+				.tree = overview_scene_tree,
+				.rx = rx,
+				.ry = ry,
+				.surf_scale = c->canvas_geom[tag].width > 0
+								  ? (float)rw / c->canvas_geom[tag].width
+								  : scale * prog,
+				.any_rendered = false,
+			};
+			wlr_surface_for_each_surface(surface, render_surface_thumbnail,
+										 &tctx);
+			if (!tctx.any_rendered) {
 				float color[4] = {0.3f, 0.5f, 0.7f, prog};
 				if (c == focustop(m)) {
 					color[0] = 0.9f;
@@ -6311,7 +6398,8 @@ void setfullscreen(Client *c, int32_t fullscreen) // 用自定义全屏代理自
 	if (c->isoverlay) {
 		wlr_scene_node_reparent(&c->scene->node, layers[LyrOverlay]);
 	} else if (client_should_overtop(c) && c->isfloating) {
-		wlr_scene_node_reparent(&c->scene->node, fullscreen ? layers[LyrTop] : layers[LyrFloat]);
+		wlr_scene_node_reparent(&c->scene->node,
+								fullscreen ? layers[LyrTop] : layers[LyrFloat]);
 	} else {
 		wlr_scene_node_reparent(
 			&c->scene->node,
@@ -7083,8 +7171,8 @@ void touchmotion(struct wl_listener *listener, void *data) {
 				}
 			}
 			if (other) {
-				double cur_dist = sqrt(pow(lx - other->end_x, 2) +
-									   pow(ly - other->end_y, 2));
+				double cur_dist =
+					sqrt(pow(lx - other->end_x, 2) + pow(ly - other->end_y, 2));
 				if (tg->pinch_dist > 1.0 && cur_dist > 1.0) {
 					float factor = (float)(cur_dist / tg->pinch_dist);
 					float old_zoom = zoom;
@@ -7971,6 +8059,26 @@ void commitx11(struct wl_listener *listener, void *data) {
 		(int32_t)c->surface.xwayland->y ==
 			(int32_t)c->geom.y + (int32_t)c->bw) {
 		c->configure_serial = 0;
+	}
+
+	if (c->mon && is_canvas_layout(c->mon) && !c->isfullscreen &&
+		!c->ismaximizescreen) {
+		uint32_t tag = c->mon->pertag->curtag;
+		float zoom = c->mon->pertag->canvas_zoom[tag];
+		float effective_zoom = zoom;
+		if (c->mon->canvas_in_overview && c->canvas_geom_backup[tag].width > 0)
+			effective_zoom *= (float)c->canvas_geom[tag].width /
+							  c->canvas_geom_backup[tag].width;
+		if (effective_zoom != 1.0f && !c->is_clip_to_hide) {
+			struct wlr_box clip_box;
+			client_get_clip(c, &clip_box);
+			clip_to_hide(c, &clip_box);
+			if (clip_box.width > 0 && clip_box.height > 0) {
+				buffer_set_effect(c, (BufferData){1.0f, 1.0f,
+								  clip_box.width, clip_box.height, true});
+				apply_canvas_zoom_dest_only(c, effective_zoom);
+			}
+		}
 	}
 }
 
