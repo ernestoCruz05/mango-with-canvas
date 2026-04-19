@@ -4816,6 +4816,15 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 	/* Find the client under the pointer and send the event along. */
 	xytonode(cursor->x, cursor->y, &surface, &c, NULL, &sx, &sy);
 
+	if (c && selmon && is_canvas_layout(selmon)) {
+		uint32_t ctag = selmon->pertag->curtag;
+		float czoom = selmon->pertag->canvas_zoom[ctag];
+		if (czoom != 1.0f) {
+			sx /= czoom;
+			sy /= czoom;
+		}
+	}
+
 	if (cursor_mode == CurPressed && !seat->drag &&
 		surface != seat->pointer_state.focused_surface &&
 		toplevel_from_wlr_surface(seat->pointer_state.focused_surface, &w,
@@ -4824,6 +4833,14 @@ void motionnotify(uint32_t time, struct wlr_input_device *device, double dx,
 		surface = seat->pointer_state.focused_surface;
 		sx = cursor->x - (l ? l->scene->node.x : w->geom.x);
 		sy = cursor->y - (l ? l->scene->node.y : w->geom.y);
+		if (!l && selmon && is_canvas_layout(selmon)) {
+			uint32_t ctag = selmon->pertag->curtag;
+			float czoom = selmon->pertag->canvas_zoom[ctag];
+			if (czoom != 1.0f) {
+				sx /= czoom;
+				sy /= czoom;
+			}
+		}
 	}
 
 	/* Update drag icon's position */
