@@ -1733,6 +1733,11 @@ void applyrules(Client *c) {
 			   (!c->istagsilent || !newtags ||
 				newtags & mon->tagset[mon->seltags]));
 
+	if (c->isopensilent) {
+		wl_list_remove(&c->flink);
+		wl_list_insert(fstack.prev, &c->flink);
+	}
+
 	if (!c->isfloating) {
 		c->old_stack_inner_per = c->stack_inner_per;
 		c->old_master_inner_per = c->master_inner_per;
@@ -4559,6 +4564,7 @@ mapnotify(struct wl_listener *listener, void *data) {
 		}
 	} else
 		wl_list_insert(clients.prev, &c->link); // 尾部入栈
+
 	wl_list_insert(&fstack, &c->flink);
 
 	applyrules(c);
@@ -7736,10 +7742,14 @@ void view_in_mon(const Arg *arg, bool want_animation, Monitor *m,
 	}
 
 	if (arg->ui == UINT32_MAX) {
-		m->pertag->prevtag = get_tags_first_tag_num(m->tagset[m->seltags]);
-		m->seltags ^= 1; /* toggle sel tagset */
-		m->pertag->curtag = get_tags_first_tag_num(m->tagset[m->seltags]);
-		goto toggleseltags;
+		if (m->tagset[0] != m->tagset[1]) {
+			m->pertag->prevtag = get_tags_first_tag_num(m->tagset[m->seltags]);
+			m->seltags ^= 1; /* toggle sel tagset */
+			m->pertag->curtag = get_tags_first_tag_num(m->tagset[m->seltags]);
+			goto toggleseltags;
+		} else {
+			return;
+		}
 	}
 
 	if ((m->tagset[m->seltags] & arg->ui & TAGMASK) != 0) {
