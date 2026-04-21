@@ -1576,6 +1576,11 @@ void applyrules(Client *c) {
 			   (!c->istagsilent || !newtags ||
 				newtags & mon->tagset[mon->seltags]));
 
+	if (c->isopensilent) {
+		wl_list_remove(&c->flink);
+		wl_list_insert(fstack.prev, &c->flink);
+	}
+
 	if (!c->isfloating) {
 		c->old_stack_inner_per = c->stack_inner_per;
 		c->old_master_inner_per = c->master_inner_per;
@@ -4211,6 +4216,7 @@ mapnotify(struct wl_listener *listener, void *data) {
 		}
 	} else
 		wl_list_insert(clients.prev, &c->link); // 尾部入栈
+
 	wl_list_insert(&fstack, &c->flink);
 
 	applyrules(c);
